@@ -112,3 +112,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# GIT
+.gitattributes
+
+# Config 
+.cfg
