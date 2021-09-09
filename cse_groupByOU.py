@@ -5,6 +5,7 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from smtplib import SMTPException
+from ldap3 import Server, Connection, SUBTREE, LEVEL
 import argparse
 import configparser
 import email
@@ -71,6 +72,13 @@ def send_report(recipient, sender_email, smtp_server):
     except SMTPException:
         pass
 
+def getConnectors(organizationalUnit):
+    '''Grab computer names from OU with LDAPs and return tuple
+    '''
+    server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
+    connection = Connection(server, user="user1", password="Password123",
+               fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
+               lazy=False, raise_exceptions=False)
 
 def main():
     '''The main logic of the script
@@ -91,6 +99,7 @@ def main():
     recipient = config.get('CSE', 'recipient')
     sender_email = config.get('CSE', 'sender_email')
     smtp_server = config.get('CSE', 'smtp_server')
+    ldap_server = config.get('LDAP', 'ldap_server')
 
     # Instantiate requestions session object
     amp_session = requests.session()
@@ -107,6 +116,12 @@ def main():
     else:
         computers_url = 'https://api.' + cloud + '.amp.cisco.com/v1/computers/'
 
+    # Open file with OU and Group guid and call on functions to move computers for each line
+    with open('groups_and_OUs.txt', 'r') as f:
+        for line in f:
+            organizationalUnit, groupGuid = line.split(':')
+            connectors = getConnectors(organizationalUnit)
+            move_to_group(connectors, groupGuid)
 
     '''
     # Query the API
