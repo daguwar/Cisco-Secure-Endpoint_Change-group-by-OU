@@ -27,8 +27,7 @@ def process_guid_json(guid_json):
     connector_guid = guid_json.get('connector_guid')
     hostname = guid_json.get('hostname')
     last_seen = guid_json.get('last_seen')
-    age = calculate_time_delta(last_seen)
-    return computer(hostname, connector_guid, age)
+    return computer(hostname, connector_guid)
 
 def get(session, url):
     '''HTTP GET the URL and return the decoded JSON
@@ -88,7 +87,6 @@ def main():
     config.read(config_file)
     client_id = config.get('CSE', 'client_id')
     api_key = config.get('CSE', 'api_key')
-    age_threshold = int(config.get('CSE', 'age_threshold'))
     cloud = config.get('CSE', 'cloud')
     recipient = config.get('CSE', 'recipient')
     sender_email = config.get('CSE', 'sender_email')
@@ -109,14 +107,16 @@ def main():
     else:
         computers_url = 'https://api.' + cloud + '.amp.cisco.com/v1/computers/'
 
+
+    '''
     # Query the API
     response_json = get(amp_session, computers_url)
 
     # Process the returned JSON
-    #initial_batch = process_response_json(response_json, age_threshold)
+    initial_batch = process_response_json(response_json, age_threshold)
 
     # Store the returned stale GUIDs
-    #computers_to_delete = computers_to_delete.union(initial_batch)
+    computers_to_delete = computers_to_delete.union(initial_batch)
 
     # Check if there are more pages and repeat
     while 'next' in response_json['metadata']['links']:
@@ -135,7 +135,7 @@ def main():
         # Delete GUIDs
         for computer in computers_to_move:
             move_guid(amp_session, computer.guid, computer.hostname, computers_url)
-
+    '''
     send_report(recipient, sender_email, smtp_server) 
 
     # Cleanup

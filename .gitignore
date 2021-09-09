@@ -117,4 +117,5 @@ dmypy.json
 .gitattributes
 
 # Config 
-.cfg
+*.cfg
+*.txt
