@@ -100,6 +100,9 @@ def main():
     sender_email = config.get('CSE', 'sender_email')
     smtp_server = config.get('CSE', 'smtp_server')
     ldap_server = config.get('LDAP', 'ldap_server')
+    ldap_port = config.get('LDAP', 'ldap_port')
+    ldap_ssl = config.get('LDAP', 'ldap_ssl')
+
 
     # Instantiate requestions session object
     amp_session = requests.session()
