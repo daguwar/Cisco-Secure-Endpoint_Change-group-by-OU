@@ -9,26 +9,22 @@ from ldap3 import Server, Connection, SUBTREE, LEVEL
 import argparse
 import configparser
 import email
+import json
 import os
 import requests
 import smtplib
 import sys
+import time
 
-def should_move(clientgroup, wantedgroup):
-    '''Check if client already member of wanted group
-    '''
-    if clientgroup == wantedgroup:
-        return False
-    return True
 
-def process_guid_json(guid_json):
+"""def process_guid_json(guid_json):
     '''Process the individual GUID entry
     '''
     computer = namedtuple('computer', ['hostname', 'guid', 'age'])
     connector_guid = guid_json.get('connector_guid')
     hostname = guid_json.get('hostname')
     last_seen = guid_json.get('last_seen')
-    return computer(hostname, connector_guid)
+    return computer(hostname, connector_guid)"""
 
 def get(session, url):
     '''HTTP GET the URL and return the decoded JSON
@@ -40,8 +36,8 @@ def get(session, url):
 def send_report(recipient, sender_email, smtp_server):
     '''Send email with the created log files as attachments
     '''
-    subject = 'Delete stale GUIDs report'
-    body = 'Log files from script "delete_stale_guids.py"'
+    subject = 'CSE - Move to group by OU'
+    body = 'Log files from script "cse_groupByOU.py"'
     # Create a multipart message and set headers
     message = MIMEMultipart()
     message["From"] = sender_email
@@ -52,7 +48,7 @@ def send_report(recipient, sender_email, smtp_server):
     # Add body to email
     message.attach(MIMEText(body, "plain"))
 
-    files = ['stale_guids.csv', 'deletion-log.txt']
+    files = ['move-log.txt']
 
     for a_file in files:
         attachment = open(a_file, 'rb')
@@ -72,15 +68,19 @@ def send_report(recipient, sender_email, smtp_server):
     except SMTPException:
         pass
 
-def get_connectors_from_ou(organizationalUnit):
-    '''Grab computer names from OU with LDAPs and return tuple
-    '''
+def get_ldap_connection():
     server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
     connection = Connection(server, user="user1", password="Password123",
                fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
                lazy=False, raise_exceptions=False)
 
-def get_connectors_from_cse(connectors_from_ou, computers_url):
+
+
+def get_connectors_from_ou(organizationalUnit):
+    '''Grab computer names from OU with LDAPs and return tuple
+    '''
+    
+def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
     connectors = []
     for connector in connectors_from_ou:
         url = computers_url + f"?hostname={connector}"
@@ -89,22 +89,35 @@ def get_connectors_from_cse(connectors_from_ou, computers_url):
         for item in j["data"]:
             hostname = item.get('hostname')
             guid = item.get('connector_guid')
-            connectors.append((hostname, guid))
+            group = item.get('group_guid')
+            if group != groupGuid:
+                connectors.append((hostname, guid))
         # Adding a delay to prevent the API from being overwhelmed with requests
         time.sleep(1)
     return connectors
 
-def move_to_group(connectors, groupGuid):
+def move_to_group(connectors, groupGuid, computers_url, auth):
     '''Move connectors to group
     '''
+    for connector in connectors:
+        APICall = requests.session()
+        APICall.auth = auth
+        url = computers_url + f"{connector[1]}"
+        headers = {'Content-Type': "application/x-www-form-urlencoded", 'Accept': "application/json"}
+        payload = f"group_guid={groupGuid}"
+        r = APICall.patch(url, data=payload, headers=headers)
+        if r.status_code == 202:
+            '''write to file (f"Connector {connector[0]} moved to {groups[groupSelection][0]}.")'''
+        else:
+            '''write to file (f"Failed to move connector, {connector[0]} to {groups[groupSelection][0]}") '''
+        # Adding a delay to prevent the API from being overwhelmed with requests
+        time.sleep(1)
+
 
 
 def main():
     '''The main logic of the script
     '''
-    # Check arguments
-    ## parser = argparse.ArgumentParser()
-    ## parser
 
     # Specify the config file
     config_file = 'cse_groupByOU.cfg'
@@ -121,11 +134,9 @@ def main():
     ldap_server = config.get('LDAP', 'ldap_server')
     ldap_port = config.get('LDAP', 'ldap_port')
     ldap_ssl = config.get('LDAP', 'ldap_ssl')
-
-
-    # Instantiate requestions session object
-    amp_session = requests.session()
-    amp_session.auth = (client_id, api_key)
+    
+    # Set auth
+    auth = (client_id, api_key)
 
     # Set to store the computer tuples in
     computers_to_move = set()
@@ -143,43 +154,13 @@ def main():
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
             connectors_from_ou = get_connectors_from_ou(organizationalUnit)
-            connectors = get_connectors_from_cse(connectors_from_ou, computers_url)
-            
-            move_to_group(connectors_from_ou, groupGuid, )
+            connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
+            move_to_group(connectors, groupGuid, computers_url, auth)
 
-    '''
-    # Query the API
-    response_json = get(amp_session, computers_url)
-
-    # Process the returned JSON
-    initial_batch = process_response_json(response_json, age_threshold)
-
-    # Store the returned stale GUIDs
-    computers_to_delete = computers_to_delete.union(initial_batch)
-
-    # Check if there are more pages and repeat
-    while 'next' in response_json['metadata']['links']:
-        next_url = response_json['metadata']['links']['next']
-        response_json = get(amp_session, next_url)
-        next_batch = process_response_json(response_json, age_threshold)
-        computers_to_delete = computers_to_delete.union(next_batch)
-
-    if computers_to_delete:
-        with open('stale_guids.csv', 'w', encoding='utf-8') as file_output:
-            file_output.write('Age in days,GUID,Hostname\n')
-            for computer in computers_to_delete:
-                file_output.write('{},{},{}\n'.format(computer.age,
-                                                      computer.guid,
-                                                      computer.hostname))
-        # Delete GUIDs
-        for computer in computers_to_move:
-            move_guid(amp_session, computer.guid, computer.hostname, computers_url)
-    '''
     send_report(recipient, sender_email, smtp_server) 
 
     # Cleanup
-    os.remove('stale_guids.csv')
-    os.remove('deletion-log.txt')
+    os.remove('move-log.txt')
 
 if __name__ == "__main__":
     main()
