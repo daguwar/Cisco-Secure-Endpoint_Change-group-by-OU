@@ -72,13 +72,32 @@ def send_report(recipient, sender_email, smtp_server):
     except SMTPException:
         pass
 
-def getConnectors(organizationalUnit):
+def get_connectors_from_ou(organizationalUnit):
     '''Grab computer names from OU with LDAPs and return tuple
     '''
     server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
     connection = Connection(server, user="user1", password="Password123",
                fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
                lazy=False, raise_exceptions=False)
+
+def get_connectors_from_cse(connectors_from_ou, computers_url):
+    connectors = []
+    for connector in connectors_from_ou:
+        url = computers_url + f"?hostname={connector}"
+        r = requests.get(url, auth=auth)
+        j = json.loads(r.content)
+        for item in j["data"]:
+            hostname = item.get('hostname')
+            guid = item.get('connector_guid')
+            connectors.append((hostname, guid))
+        # Adding a delay to prevent the API from being overwhelmed with requests
+        time.sleep(1)
+    return connectors
+
+def move_to_group(connectors, groupGuid):
+    '''Move connectors to group
+    '''
+
 
 def main():
     '''The main logic of the script
@@ -123,8 +142,10 @@ def main():
     with open('groups_and_OUs.txt', 'r') as f:
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
-            connectors = getConnectors(organizationalUnit)
-            move_to_group(connectors, groupGuid)
+            connectors_from_ou = get_connectors_from_ou(organizationalUnit)
+            connectors = get_connectors_from_cse(connectors_from_ou, computers_url)
+            
+            move_to_group(connectors_from_ou, groupGuid, )
 
     '''
     # Query the API
