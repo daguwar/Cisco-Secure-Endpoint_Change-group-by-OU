@@ -1,0 +1,2 @@
+OU=computers1,DC=corporation,DC=com:a1b2c3d4-1ab2-12a0-1234-1abcdefab123
+OU=computers2,DC=corporation,DC=com:b2c3d4e5-2bc3-23b1-2345-2bcdefabc234

@@ -24,17 +24,17 @@ import time
     connector_guid = guid_json.get('connector_guid')
     hostname = guid_json.get('hostname')
     last_seen = guid_json.get('last_seen')
-    return computer(hostname, connector_guid)"""
+    return computer(hostname, connector_guid)
 
 def get(session, url):
     '''HTTP GET the URL and return the decoded JSON
     '''
     response = session.get(url)
     response_json = response.json()
-    return response_json
+    return response_json"""
 
 def send_report(recipient, sender_email, smtp_server):
-    '''Send email with the created log files as attachments
+    '''Send email with the created log files as attachments. Expects no authentication on smtp server.
     '''
     subject = 'CSE - Move to group by OU'
     body = 'Log files from script "cse_groupByOU.py"'
@@ -48,7 +48,7 @@ def send_report(recipient, sender_email, smtp_server):
     # Add body to email
     message.attach(MIMEText(body, "plain"))
 
-    files = ['move-log.txt']
+    files = ['move-log.csv']
 
     for a_file in files:
         attachment = open(a_file, 'rb')
@@ -68,15 +68,18 @@ def send_report(recipient, sender_email, smtp_server):
     except SMTPException:
         pass
 
-def get_ldap_connection():
+def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password):
     server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
-    connection = Connection(server, user="user1", password="Password123",
+    connection = Connection(server, user=ldap_user, password=ldap_password,
                fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
                lazy=False, raise_exceptions=False)
+    connection.starttls()
+
+    return connection
 
 
 
-def get_connectors_from_ou(organizationalUnit):
+def get_connectors_from_ou(conn, organizationalUnit):
     '''Grab computer names from OU with LDAPs and return tuple
     '''
     
@@ -99,19 +102,26 @@ def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
 def move_to_group(connectors, groupGuid, computers_url, auth):
     '''Move connectors to group
     '''
-    for connector in connectors:
-        APICall = requests.session()
-        APICall.auth = auth
-        url = computers_url + f"{connector[1]}"
-        headers = {'Content-Type': "application/x-www-form-urlencoded", 'Accept': "application/json"}
-        payload = f"group_guid={groupGuid}"
-        r = APICall.patch(url, data=payload, headers=headers)
-        if r.status_code == 202:
-            '''write to file (f"Connector {connector[0]} moved to {groups[groupSelection][0]}.")'''
-        else:
-            '''write to file (f"Failed to move connector, {connector[0]} to {groups[groupSelection][0]}") '''
-        # Adding a delay to prevent the API from being overwhelmed with requests
-        time.sleep(1)
+    with open('move-log.csv', 'a', encoding='utf-8') as file_output:
+        for connector in connectors:
+            APICall = requests.session()
+            APICall.auth = auth
+            url = computers_url + f"{connector[1]}"
+            headers = {'Content-Type': "application/x-www-form-urlencoded", 'Accept': "application/json"}
+            payload = f"group_guid={groupGuid}"
+            r = APICall.patch(url, data=payload, headers=headers)
+            if r.status_code == 202:
+                file_output.write('{},{},{},{},Success\n'.format(connector[0],
+                                                      connector[1],
+                                                      groupGuid,
+                                                      r.status_code))
+            else:
+                file_output.write('{},{},{},{},Failure\n'.format(connector[0],
+                                                      connector[1],
+                                                      groupGuid,
+                                                      r.status_code))
+            # Adding a delay to prevent the API from being overwhelmed with requests
+            time.sleep(1)
 
 
 
@@ -128,39 +138,43 @@ def main():
     client_id = config.get('CSE', 'client_id')
     api_key = config.get('CSE', 'api_key')
     cloud = config.get('CSE', 'cloud')
-    recipient = config.get('CSE', 'recipient')
-    sender_email = config.get('CSE', 'sender_email')
-    smtp_server = config.get('CSE', 'smtp_server')
+    recipient = config.get('EMAIL', 'recipient')
+    sender_email = config.get('EMAIL', 'sender_email')
+    smtp_server = config.get('EMAIL', 'smtp_server')
     ldap_server = config.get('LDAP', 'ldap_server')
     ldap_port = config.get('LDAP', 'ldap_port')
     ldap_ssl = config.get('LDAP', 'ldap_ssl')
-    
+    ldap_user = config.get('LDAP', 'ldap_user')
+    ldap_password = config.get('LDAP', 'ldap_password')
+
+
     # Set auth
     auth = (client_id, api_key)
 
-    # Set to store the computer tuples in
-    computers_to_move = set()
-
     # URL to query AMP
-    cloud = config.get('CSE', 'cloud')
-
     if cloud == '':
         computers_url = 'https://api.amp.cisco.com/v1/computers/'
     else:
         computers_url = 'https://api.' + cloud + '.amp.cisco.com/v1/computers/'
 
+    # Create log file and write headers.
+    with open('move-log.csv', 'a', encoding='utf-8') as file_output:
+        file_output.write('Hostname,GUID,Group Guid,Status code,Status')
+    file_output.close()
+
     # Open file with OU and Group guid and call on functions to move computers for each line
     with open('groups_and_OUs.txt', 'r') as f:
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
-            connectors_from_ou = get_connectors_from_ou(organizationalUnit)
+            conn = get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password)
+            connectors_from_ou = get_connectors_from_ou(conn, organizationalUnit)
             connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
             move_to_group(connectors, groupGuid, computers_url, auth)
 
     send_report(recipient, sender_email, smtp_server) 
 
     # Cleanup
-    os.remove('move-log.txt')
+    os.remove('move-log.csv')
 
 if __name__ == "__main__":
     main()
