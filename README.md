@@ -17,12 +17,13 @@ Config file must be in same folder as script, named cse_groupByOU.cfg and contai
     smtp_server = your.smtp.server
 
     [LDAP]
-    ldap_server = ldap:\\ldap.domain.com
-    ldap_port = 389
-    ldap_ssl = TRUE
+    ldap_server = ldaps:\\ldap.domain.com
+    ldap_port = 636
+    ldap_ssl = True
     ldap_user = 
     ldap_password = 
 
 The file groups_and_OUs.txt need to be created in the same folder as the script and contain base DN and CSE Group guid separated by a colon, for example:
-        OU=computers1,DC=corporation,DC=com:a1b2c3d4-1ab2-12a0-1234-1abcdefab123
-        OU=computers2,DC=corporation,DC=com:b2c3d4e5-2bc3-23b1-2345-2bcdefabc234
+    OU=computers1,DC=corporation,DC=com:a1b2c3d4-1ab2-12a0-1234-1abcdefab123
+    OU=computers2,DC=corporation,DC=com:b2c3d4e5-2bc3-23b1-2345-2bcdefabc234
+
