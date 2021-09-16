@@ -1,19 +1,14 @@
-from collections import namedtuple
-from datetime import datetime
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from smtplib import SMTPException
-from ldap3 import Server, Connection, SUBTREE, LEVEL
-import argparse
+from ldap3 import Server, Connection, core, SUBTREE
 import configparser
-import email
 import json
 import os
 import requests
 import smtplib
-import sys
 import time
 
 
@@ -70,19 +65,33 @@ def send_report(recipient, sender_email, smtp_server):
 
 def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password):
     server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
-    connection = Connection(server, user=ldap_user, password=ldap_password,
-               fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
-               lazy=False, raise_exceptions=False)
-    connection.starttls()
+    try:
+        ldap_connection = Connection(server, user=ldap_user, password=ldap_password,
+                fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
+                lazy=False, raise_exceptions=False)
+        return ldap_connection
+    except core.exceptions.LDAPBindError as e:
+        print('LDAP Bind Failed: ', e) 
 
-    return connection
 
-
-
-def get_connectors_from_ou(conn, organizationalUnit):
-    '''Grab computer names from OU with LDAPs and return tuple
+def get_connectors_from_ou(ldap_connection, organizationalUnit):
+    '''Grab computer names from OU with LDAP and return list
     '''
-    
+    results = list()
+    elements = ldap_connection.extend.standard.paged_search(
+        search_base=organizationalUnit,
+        search_filter='(objectclass=computer)',
+        search_scope=SUBTREE,
+        attributes=['name'],
+        paged_size=100, 
+        generator=False)
+    for element in elements:
+        if 'dn' in element:
+            hostname = element['attributes']['name']
+            results.append(hostname)
+    return results
+
+
 def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
     connectors = []
     for connector in connectors_from_ou:
@@ -166,8 +175,8 @@ def main():
     with open('groups_and_OUs.txt', 'r') as f:
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
-            conn = get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password)
-            connectors_from_ou = get_connectors_from_ou(conn, organizationalUnit)
+            ldap_connection = get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password)
+            connectors_from_ou = get_connectors_from_ou(ldap_connection, organizationalUnit)
             connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
             move_to_group(connectors, groupGuid, computers_url, auth)
 
