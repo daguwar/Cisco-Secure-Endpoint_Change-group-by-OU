@@ -26,7 +26,7 @@ def send_report(recipient, sender_email, smtp_server):
     # Add body to email
     message.attach(MIMEText(body, "plain"))
 
-    files = ['move-log.csv']
+    files = ['move-log.txt']
 
     for a_file in files:
         attachment = open(a_file, 'rb')
@@ -53,9 +53,11 @@ def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_passwo
         ldap_connection = Connection(server, user=ldap_user, password=ldap_password,
                 fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
                 lazy=False, raise_exceptions=False)
+    except core.exceptions.LDAPExceptionError as e:
+        with open('move-log.txt', 'w', encoding='utf-8') as file_output:
+            file_output.write('LDAP exception: ' + str(e))
+    else:
         return ldap_connection
-    except core.exceptions.LDAPBindError as e:
-        print('LDAP Bind Failed: ', e) 
 
 
 def get_connectors_from_ou(ldap_connection, organizationalUnit):
@@ -80,43 +82,50 @@ def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
     connectors = []
     for connector in connectors_from_ou:
         url = computers_url + f"?hostname={connector[0]}"
-        r = requests.get(url, auth=auth)
-        j = json.loads(r.content)
-        for item in j["data"]:
-            hostname = item.get('hostname')
-            guid = item.get('connector_guid')
-            group = item.get('group_guid')
-            if group.strip() != groupGuid.strip():
-                connectors.append((hostname, guid))
+        try:
+            r = requests.get(url, auth=auth)
+        except requests.exceptions.RequestException as e:
+            with open('move-log.txt', 'w', encoding='utf-8') as file_output:
+                file_output.write('Requests exception: ' + str(e))
+        else:
+            j = json.loads(r.content)
+            for item in j["data"]:
+                hostname = item.get('hostname')
+                guid = item.get('connector_guid')
+                group = item.get('group_guid')
+                if group.strip() != groupGuid.strip():
+                    connectors.append((hostname, guid))
         # Adding a delay to prevent the API from being overwhelmed with requests
-        time.sleep(1)
+            time.sleep(1)
     return connectors
 
 def move_to_group(connectors, groupGuid, computers_url, auth):
     '''Move connectors to group
     '''
-    with open('move-log.csv', 'a', encoding='utf-8') as file_output:
+    with open('move-log.txt', 'a', encoding='utf-8') as file_output:
         for connector in connectors:
             APICall = requests.session()
-            #APICall.auth = auth
             url = computers_url + f"{connector[1]}"
             headers = {'Content-Type': "application/x-www-form-urlencoded", 'Accept': "application/json"}
             payload = f"group_guid={groupGuid.strip()}"
-            r = APICall.patch(url, auth=auth, data=payload, headers=headers)
-            if r.status_code == 202:
-                file_output.write('{},{},{},{},Success\n'.format(connector[0],
-                                                      connector[1],
-                                                      groupGuid.strip(),
-                                                      r.status_code))
+            try:
+                r = APICall.patch(url, auth=auth, data=payload, headers=headers)
+            except requests.exceptions.RequestException as e:
+                with open('move-log.txt', 'w', encoding='utf-8') as file_output:
+                    file_output.write('Requests exception: ' + str(e))
             else:
-                file_output.write('{},{},{},{},Failure\n'.format(connector[0],
-                                                      connector[1],
-                                                      groupGuid.strip(),
-                                                      r.status_code))
+                if r.status_code == 202:
+                    file_output.write('{},{},{},{},Success\n'.format(connector[0],
+                                                        connector[1],
+                                                        groupGuid.strip(),
+                                                        r.status_code))
+                else:
+                    file_output.write('{},{},{},{},Failure\n'.format(connector[0],
+                                                        connector[1],
+                                                        groupGuid.strip(),
+                                                        r.status_code))
             # Adding a delay to prevent the API from being overwhelmed with requests
             time.sleep(1)
-
-
 
 def main():
     '''The main logic of the script
@@ -151,7 +160,7 @@ def main():
         computers_url = 'https://api.' + cloud + '.amp.cisco.com/v1/computers/'
 
     # Create log file and write headers.
-    with open('move-log.csv', 'w', encoding='utf-8') as file_output:
+    with open('move-log.txt', 'w', encoding='utf-8') as file_output:
         file_output.write('Hostname,GUID,Group Guid,Status code,Status\n')
     file_output.close()
 
@@ -167,7 +176,7 @@ def main():
     send_report(recipient, sender_email, smtp_server) 
 
     # Cleanup
-    os.remove('move-log.csv')
+    os.remove('move-log.txt')
 
 if __name__ == "__main__":
     main()
