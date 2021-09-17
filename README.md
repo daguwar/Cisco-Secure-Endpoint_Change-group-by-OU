@@ -17,7 +17,7 @@ Config file must be in same folder as script, named cse_groupByOU.cfg and contai
     smtp_server = your.smtp.server
 
     [LDAP]
-    ldap_server = ldaps:\\ldap.domain.com
+    ldap_server = ldap.domain.com
     ldap_port = 636
     ldap_ssl = True
     ldap_user = 

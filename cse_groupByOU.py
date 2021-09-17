@@ -11,23 +11,6 @@ import requests
 import smtplib
 import time
 
-
-"""def process_guid_json(guid_json):
-    '''Process the individual GUID entry
-    '''
-    computer = namedtuple('computer', ['hostname', 'guid', 'age'])
-    connector_guid = guid_json.get('connector_guid')
-    hostname = guid_json.get('hostname')
-    last_seen = guid_json.get('last_seen')
-    return computer(hostname, connector_guid)
-
-def get(session, url):
-    '''HTTP GET the URL and return the decoded JSON
-    '''
-    response = session.get(url)
-    response_json = response.json()
-    return response_json"""
-
 def send_report(recipient, sender_email, smtp_server):
     '''Send email with the created log files as attachments. Expects no authentication on smtp server.
     '''
@@ -64,7 +47,8 @@ def send_report(recipient, sender_email, smtp_server):
         pass
 
 def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password):
-    server = Server(ldap_server, port=int(ldap_port), use_ssl=ldap_ssl, get_info='ALL')
+    int_ldap_port = int(ldap_port)
+    server = Server(ldap_server, port=int_ldap_port, use_ssl=ldap_ssl, get_info='ALL')
     try:
         ldap_connection = Connection(server, user=ldap_user, password=ldap_password,
                 fast_decoder=True, auto_bind=True, auto_referrals=True, check_names=False, read_only=True,
@@ -95,14 +79,14 @@ def get_connectors_from_ou(ldap_connection, organizationalUnit):
 def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
     connectors = []
     for connector in connectors_from_ou:
-        url = computers_url + f"?hostname={connector}"
+        url = computers_url + f"?hostname={connector[0]}"
         r = requests.get(url, auth=auth)
         j = json.loads(r.content)
         for item in j["data"]:
             hostname = item.get('hostname')
             guid = item.get('connector_guid')
             group = item.get('group_guid')
-            if group != groupGuid:
+            if group.strip() != groupGuid.strip():
                 connectors.append((hostname, guid))
         # Adding a delay to prevent the API from being overwhelmed with requests
         time.sleep(1)
@@ -114,20 +98,20 @@ def move_to_group(connectors, groupGuid, computers_url, auth):
     with open('move-log.csv', 'a', encoding='utf-8') as file_output:
         for connector in connectors:
             APICall = requests.session()
-            APICall.auth = auth
+            #APICall.auth = auth
             url = computers_url + f"{connector[1]}"
             headers = {'Content-Type': "application/x-www-form-urlencoded", 'Accept': "application/json"}
-            payload = f"group_guid={groupGuid}"
-            r = APICall.patch(url, data=payload, headers=headers)
+            payload = f"group_guid={groupGuid.strip()}"
+            r = APICall.patch(url, auth=auth, data=payload, headers=headers)
             if r.status_code == 202:
                 file_output.write('{},{},{},{},Success\n'.format(connector[0],
                                                       connector[1],
-                                                      groupGuid,
+                                                      groupGuid.strip(),
                                                       r.status_code))
             else:
                 file_output.write('{},{},{},{},Failure\n'.format(connector[0],
                                                       connector[1],
-                                                      groupGuid,
+                                                      groupGuid.strip(),
                                                       r.status_code))
             # Adding a delay to prevent the API from being overwhelmed with requests
             time.sleep(1)
@@ -167,8 +151,8 @@ def main():
         computers_url = 'https://api.' + cloud + '.amp.cisco.com/v1/computers/'
 
     # Create log file and write headers.
-    with open('move-log.csv', 'a', encoding='utf-8') as file_output:
-        file_output.write('Hostname,GUID,Group Guid,Status code,Status')
+    with open('move-log.csv', 'w', encoding='utf-8') as file_output:
+        file_output.write('Hostname,GUID,Group Guid,Status code,Status\n')
     file_output.close()
 
     # Open file with OU and Group guid and call on functions to move computers for each line
