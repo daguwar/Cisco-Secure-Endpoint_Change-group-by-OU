@@ -56,8 +56,9 @@ def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_passwo
     except core.exceptions.LDAPExceptionError as e:
         with open('move-log.txt', 'w', encoding='utf-8') as file_output:
             file_output.write('LDAP exception: ' + str(e))
-    else:
-        return ldap_connection
+        ldap_connection = 0
+
+    return ldap_connection
 
 
 def get_connectors_from_ou(ldap_connection, organizationalUnit):
@@ -84,9 +85,11 @@ def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
         url = computers_url + f"?hostname={connector[0]}"
         try:
             r = requests.get(url, auth=auth)
+            r.raise_for_status()
         except requests.exceptions.RequestException as e:
-            with open('move-log.txt', 'w', encoding='utf-8') as file_output:
+            with open('move-log.txt', 'a', encoding='utf-8') as file_output:
                 file_output.write('Requests exception: ' + str(e))
+            connectors = 0
         else:
             j = json.loads(r.content)
             for item in j["data"]:
@@ -110,8 +113,9 @@ def move_to_group(connectors, groupGuid, computers_url, auth):
             payload = f"group_guid={groupGuid.strip()}"
             try:
                 r = APICall.patch(url, auth=auth, data=payload, headers=headers)
+                r.raise_for_status()
             except requests.exceptions.RequestException as e:
-                with open('move-log.txt', 'w', encoding='utf-8') as file_output:
+                with open('move-log.txt', 'a', encoding='utf-8') as file_output:
                     file_output.write('Requests exception: ' + str(e))
             else:
                 if r.status_code == 202:
@@ -166,12 +170,18 @@ def main():
 
     # Open file with OU and Group guid and call on functions to move computers for each line
     with open('groups_and_OUs.txt', 'r') as f:
+        ldap_connection = 0
+        connectors_from_ou = 0
+        connectors = 0
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
             ldap_connection = get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password)
-            connectors_from_ou = get_connectors_from_ou(ldap_connection, organizationalUnit)
-            connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
-            move_to_group(connectors, groupGuid, computers_url, auth)
+            if ldap_connection != 0:
+                connectors_from_ou = get_connectors_from_ou(ldap_connection, organizationalUnit)
+            if connectors_from_ou != 0:
+                connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
+            if connectors != 0:
+                move_to_group(connectors, groupGuid, computers_url, auth)
 
     send_report(recipient, sender_email, smtp_server) 
 
