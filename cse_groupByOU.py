@@ -55,7 +55,7 @@ def get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_passwo
                 lazy=False, raise_exceptions=False)
     except core.exceptions.LDAPExceptionError as e:
         with open('move-log.txt', 'w', encoding='utf-8') as file_output:
-            file_output.write('LDAP exception: ' + str(e))
+            file_output.write('LDAP exception: \n' + str(e) + '\n')
         ldap_connection = 0
 
     return ldap_connection
@@ -88,7 +88,7 @@ def get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth):
             r.raise_for_status()
         except requests.exceptions.RequestException as e:
             with open('move-log.txt', 'a', encoding='utf-8') as file_output:
-                file_output.write('Requests exception: ' + str(e))
+                file_output.write('Requests exception: \n' + str(e) + '\n')
             connectors = 0
         else:
             j = json.loads(r.content)
@@ -116,7 +116,7 @@ def move_to_group(connectors, groupGuid, computers_url, auth):
                 r.raise_for_status()
             except requests.exceptions.RequestException as e:
                 with open('move-log.txt', 'a', encoding='utf-8') as file_output:
-                    file_output.write('Requests exception: ' + str(e))
+                    file_output.write('Requests exception: \n' + str(e) + '\n')
             else:
                 if r.status_code == 202:
                     file_output.write('{},{},{},{},Success\n'.format(connector[0],
@@ -176,14 +176,19 @@ def main():
         for line in f:
             organizationalUnit, groupGuid = line.split(':')
             ldap_connection = get_ldap_connection(ldap_server, ldap_port, ldap_ssl, ldap_user, ldap_password)
+            # If no ldap connection, do not go further
             if ldap_connection != 0:
                 connectors_from_ou = get_connectors_from_ou(ldap_connection, organizationalUnit)
-            if connectors_from_ou != 0:
-                connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
-            if connectors != 0:
-                move_to_group(connectors, groupGuid, computers_url, auth)
-
-    send_report(recipient, sender_email, smtp_server) 
+                if connectors_from_ou != 0:
+                    connectors = get_connectors_from_cse(connectors_from_ou, groupGuid, computers_url, auth)  
+                    if connectors != 0:
+                        move_to_group(connectors, groupGuid, computers_url, auth)
+    
+    # Check whether more than one line have been written to log file. If not, don't send email
+    with open(r"move-log.txt", 'r') as fp:
+        x = len(fp.readlines())
+    if x > 1:
+        send_report(recipient, sender_email, smtp_server) 
 
     # Cleanup
     os.remove('move-log.txt')
